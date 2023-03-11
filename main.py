@@ -16,6 +16,7 @@ import random as rd                     #Facilitates randomization of training f
 import cv2 as cv                        #Image handling/processing
 import numpy as np                      #Support tensorflow (np.array)
 import tensorflow as tf                 #Tensorflow AI library
+import skimage                          #Noise injection
 from matplotlib import pyplot as plt    #Plot images and metrics info
 from tqdm import tqdm                   #Status bar for long-processing items
 
@@ -32,27 +33,33 @@ NOISY = 'noisy\\'
 def NLM(image):
     #Wrapper function on openCV NLM
     #TODO - tune parameters/config
-    return cv.fastNlMeansDenoisingColored(image,None,35,35,7,21)
+    return cv.fastNlMeansDenoisingColored(image,None,7,7,7,13)
 
 #CNN Autoencoder ----------------------------------------------------------------------------------
 class Autoencoder:
     #TODO - Model structure, hyper-parameters, and training parameters need to be reviewed/tuned
     #       initial set-up as proof-of-concept/image testing. Has not been optimized
-    def __init__(self):
+    def __init__(self,weights_handle='model'):
         #Constructor - Initialize NN structure and compile TensorFlow model. Attempts
         #              to reload previously trained model weights if available and
         #              compatible
 
+        self.weights_handle = weights_handle
+
         #NN Model structure
         input = tf.keras.Input(shape=(64,64,3)) #64 x 64 patch images
         #Encoder
-        x = tf.keras.layers.Conv2D(64, (3, 3), activation="relu", kernel_initializer='he_normal',padding="same")(input)
+        x = tf.keras.layers.Conv2D(32, (3, 3), activation="relu", kernel_initializer='he_normal',padding="same")(input)
         x = tf.keras.layers.MaxPooling2D((2, 2), padding="same")(x)
-        x = tf.keras.layers.Conv2D(32, (3, 3), activation="relu", kernel_initializer='he_normal',padding="same")(x)
+        x = tf.keras.layers.Conv2D(64, (3, 3), activation="relu", kernel_initializer='he_normal',padding="same")(x)
         x = tf.keras.layers.MaxPooling2D((2, 2), padding="same")(x)
+        x = tf.keras.layers.Conv2D(128, (3, 3), activation="relu", kernel_initializer='he_normal',padding="same")(x)
+        x = tf.keras.layers.MaxPooling2D((2, 2), padding="same")(x)
+        
         #Decoder
-        x = tf.keras.layers.Conv2DTranspose(32, (3, 3), strides=2, activation="relu",kernel_initializer='he_normal', padding="same")(x)
+        x = tf.keras.layers.Conv2DTranspose(128, (3, 3), strides=2, activation="relu",kernel_initializer='he_normal', padding="same")(x)
         x = tf.keras.layers.Conv2DTranspose(64, (3, 3), strides=2, activation="relu", kernel_initializer='he_normal',padding="same")(x)
+        x = tf.keras.layers.Conv2DTranspose(32, (3, 3), strides=2, activation="relu", kernel_initializer='he_normal',padding="same")(x)
         x = tf.keras.layers.Conv2D(3, (3, 3), activation="sigmoid", kernel_initializer='he_normal',padding="same")(x)
 
         #Compile model
@@ -64,7 +71,7 @@ class Autoencoder:
         
         #Reload model weights (if they exist)
         try:
-            self.model.load_weights('model').expect_partial()
+            self.model.load_weights(self.weights_handle).expect_partial()
         except:
             print('> WARNING: saved model weights could not be found/restored')
         return
@@ -80,7 +87,7 @@ class Autoencoder:
         if len(files) >= max_N: files = rd.sample(files, max_N)
 
         #Load images from file
-        print('Loading and segmenting training images:')
+        print('Loading and segmenting training images...')
         nonce = True
         for i in tqdm(range(len(files))):
             #Fetch ground image. Before saving, normalize and split into patch images
@@ -108,22 +115,26 @@ class Autoencoder:
                 self.train_y = np.concatenate((self.train_y,g_patches))
         return
         
-    def train(self):
+    def train(self,labeled=True):
         #Load training images from file
         self.load_training_images()
 
         #Traing model. Uses noisy images as x-input, and ground truth as y-label
         print("Training model:")
+        if labeled:
+            y_set = self.train_y
+        else:
+            y_set = self.train_x
         self.model.fit(
             x=self.train_x,
-            y=self.train_y,
+            y=y_set,
             epochs=10,
-            batch_size=128,
+            batch_size=32,
             shuffle=True,
             )
         
         #Save model weights for future re-use
-        self.model.save_weights('model')    
+        self.model.save_weights(self.weights_handle)    
         return
     
     def denoise(self,image):
@@ -134,10 +145,10 @@ class Autoencoder:
         patches = gen_patches(image,8)
         
         #Make prediction from NN
-        prediction = self.model.predict(patches)
+        prediction = self.model.predict(patches,verbose=0)
 
         #Recombine patch images and denormalize before returning
-        denoised = stitch_patches(prediction)
+        denoised = stitch_patches(prediction,8)
         return v_denormalize(denoised)
     
 #Image Pre/Post-Processing ------------------------------------------------------------------------
@@ -155,7 +166,7 @@ v_normalize = np.vectorize(normalize)   #Vectorize for use over np.array
 def denormalize(pixel):
     #De-scale input pixel from float32 [0,1] to int [0,255] to denormalize image from NN
     #DO NOT USE - use vectorized v_denormalize(). Operates over all elements in np.array
-    return int(pixel*255)
+    return np.uint8(pixel*255)
 v_denormalize = np.vectorize(denormalize)   #Vectorize for use over np.array
 
 
@@ -194,60 +205,164 @@ def stitch_patches(patches,n=8):
         image[x*w:(x+1)*w, y*h:(y+1)*h, :] = patches[i]
     return image
 
+#Noise Injection ----------------------------------------------------------------------------------
+def generate_noisy_images(directories=[TRAIN_ROOT,TEST_ROOT,VALIDATE_ROOT],mode='gaussian',var=0.01):
+    #Generate noisy images from source images in target directories
+    #Inputs:    directories - array of target directories (searches in GROUND sub-folder and
+    #                         generate NOISY sub-folder)
+    #           mode - noise generation method (of skimage.util.random_noise())
+    #           var - variance control (of skimage.util.random_noise())
+    #Outputs:   none - writes resultant outputs to file in supplied directories
+
+    for root in directories:
+        print('Generating noisy images in path <' + root + NOISY + '>...')
+        if not (os.path.isdir(root+NOISY)):
+            os.makedirs(root+NOISY) 
+        files = os.listdir(root+GROUND)
+        for file in tqdm(files):
+            img = get_image(root+GROUND+file)
+            noise_img = skimage.util.random_noise(img, mode=mode,seed=None, clip=True, var=var)
+            noise_img = np.array(255*noise_img, dtype = 'uint8')
+            noise_img = cv.cvtColor(noise_img, cv.COLOR_RGB2BGR)
+            cv.imwrite(root+NOISY+file.replace(".jpg", "_noise.jpg" ), noise_img)
+    return
+
 #Performance Metrics ------------------------------------------------------------------------------
 #TODO - create performance metrics functions to be used on denoising analysis
 def MSE(A,B):
-    #TODO - mse implementation. Can reuse tf.keras.losses.MeanSquaredError() ?
-    return 0
+    A = cv.cvtColor(A, cv.COLOR_RGB2GRAY)
+    B = cv.cvtColor(B, cv.COLOR_RGB2GRAY)
+    h, w = A.shape
+    diff = cv.subtract(A, B)
+    err = np.sum(diff**2)
+    mse = err/(float(h*w))
+    return mse
 
 def PNSR(A,B):
-    #TODO - psnr (peak signal to noise ratio) implementation
-    return 0
+    return float(tf.image.psnr(A, B, 225, name=None))
 
 def SSIM(A,B):
-    #TODO - ssim (structural similarity index) implementation
-    return 0
+    return float(tf.image.ssim(A, B, max_val=255, filter_size=11, filter_sigma=1.5, k1=0.01, k2=0.03))
+
+def batch_assess(encoder,directory=TEST_ROOT,N=100,verbose=True):
+    #Assess average performance of provided autoencoder model over N random images
+    #Inputs:    encoder - autoencoder model to assess
+    #           dorectory - root of image directory to pull ground-truth and noisy images from
+    #           N - number of images to assess
+
+    #Fetch random images
+    files = os.listdir(TEST_ROOT+GROUND)
+    if len(files) >= N: files = rd.sample(files, N)
+
+    #Iterate over images and calculate performance metrics
+    print('Assessing performance over sample images...')
+    #results = [[noise], [nlm], [auto]]
+    #          [[mse, pnsr, ssim] ... [mse, pnsr, ssim]]
+    results = [[0]*3 for i in range(3)]
+    for i in tqdm(range(len(files))):
+        ground = get_image(TEST_ROOT+GROUND+files[i])
+        noise = get_image(TEST_ROOT+NOISY+files[i].replace('.jpg','_noise.jpg'))
+        f_nlm = NLM(noise)
+        f_auto = encoder.denoise(noise)
+
+        images = [noise,f_nlm,f_auto]
+        for j in range(3):
+            results[j][0] += MSE(ground,images[j])
+            results[j][1] += PNSR(ground,images[j])
+            results[j][2] += SSIM(ground,images[j])
+
+    #Average performance over N samples
+    for i in range(3):
+        for j in range(3):
+            results[i][j] /= N
+
+    if verbose:
+        #Display results to terminal
+        print('Average performance over ' + str(N) + ' images:')
+        print('\tSource noisy image (compared to ground-truth):')
+        print('\t\tMSE  = ' + str(results[0][0]))
+        print('\t\tPNSR = ' + str(results[0][1]))
+        print('\t\tSSIM = ' + str(results[0][2]))
+        print('\tNon-Local Means:')
+        print('\t\tMSE  = ' + str(results[1][0]))
+        print('\t\tPNSR = ' + str(results[1][1]))
+        print('\t\tSSIM = ' + str(results[1][2]))
+        print('\tAutoencoder:')
+        print('\t\tMSE  = ' + str(results[2][0]))
+        print('\t\tPNSR = ' + str(results[2][1]))
+        print('\t\tSSIM = ' + str(results[2][2]))
+    return results
 
 #Display Functions --------------------------------------------------------------------------------
-def display_image(image):
-    #Simple image display via matplotlib
-    plt.close()
-    plt.imshow(image)
-    plt.axis('off')
-    plt.show()
-    return
+def display_metrics(ground,noise,nlm,auto,filename=None):
+    #Display metrics for input image and filtered images
+    #Inputs:    ground - ground-truth, no noise image
+    #           noise - noisy image provided to filters
+    #           nlm - image filtered by non-local means
+    #           auto - image filtered by autoencoder
+    #Outputs:   none - displays to user directly or saves to file
 
-def display_comparison(images):
-    #Simple display bis matplot lib, compare images (visually) by plotting
-    #them side by side
+    #Set up image/label arrays for axis control
+    images = [ground, noise, nlm, auto]
+    labels = ['Original Image', 'Noised Image', 'NLM', 'Autoencoder']
+
+    #Initialize plot
     plt.close()
-    fig,ax = plt.subplots(1,len(images))
-    for i in range(len(images)):
+    fig,ax = plt.subplots(1,4)
+    plt.suptitle('Image Denoising: NLM vs Convolutional Autoencoder', y=0.7)
+
+    #Iterate over images
+    for i in range(4):
         ax[i].imshow(images[i])
         ax[i].get_xaxis().set_visible(False)
         ax[i].get_yaxis().set_visible(False)
-    plt.show()
+
+        #Compute and display metrics, unless ground-truth image
+        if i != 0:
+            mse = MSE(ground,images[i])
+            pnsr = PNSR(ground,images[i])
+            ssim = SSIM(ground,images[i])
+            labels[i] += ('\n\nMSE = ' + str(round(mse,3))
+                          + '\nPSNR = ' + str(round(pnsr,3))
+                          + '\nSSIM = ' + str(round(ssim,3)))
+            ax[i].text(0.5,-0.15, labels[i], ha="center", va='top', transform=ax[i].transAxes)
+    
+    #Save to file or display to user
+    if filename != None:
+        plt.savefig(filename)
+        print('Saved \'' + filename + '\' to file')
+    else:
+        plt.show()
     return
+
+def view_samples(encoder,directory=TEST_ROOT,N=5):
+    files = os.listdir(directory+NOISY)
+    files = rd.sample(files,N)
+    for file in files:
+        test = get_image(directory+NOISY+file)
+        ground = get_image(directory+GROUND+file.replace('_noise.jpg','.jpg'))
+        f_auto = encoder.denoise(test)
+        f_nlm = NLM(test)
+        display_metrics(ground,test,f_nlm,f_auto)
+    return
+
         
 #Main ---------------------------------------------------------------------------------------------
 def main():
     #TODO - structure into final performance implemenation + analysis (with metrics). Below
     # as initial setup to invoke current content
 
-    #Fetch random test image
-    files = os.listdir(TEST_ROOT+NOISY)
-    file = rd.choice(files)
-    test = get_image(TEST_ROOT+NOISY+file)
+    #Regenerate noisy images from original data. By default does this for all image sets
+    #generate_noisy_images(var=0.01)
 
-    #NLM filtering
-    filtered = NLM(test)
-    display_comparison([test,filtered])
-
-    #Autoencoder filtering
     auto = Autoencoder()
     #auto.train()   #If commented out, Autoencoder() will pull from previously trained weights
-    filtered = auto.denoise(test)
-    display_comparison([test,filtered])
+
+    #Assess performance
+    #batch_assess(auto,N=50)
+
+    #Fetch random test image and display to user
+    view_samples(auto)
 
     return
 
