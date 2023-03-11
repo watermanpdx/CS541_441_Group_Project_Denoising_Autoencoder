@@ -353,7 +353,7 @@ def main():
     # as initial setup to invoke current content
 
     #Regenerate noisy images from original data. By default does this for all image sets
-    #generate_noisy_images(var=0.01)
+    generate_noisy_images(var=0.01)
 
     auto = Autoencoder()
     #auto.train()   #If commented out, Autoencoder() will pull from previously trained weights
