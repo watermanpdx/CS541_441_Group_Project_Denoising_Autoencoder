@@ -4,7 +4,7 @@ Description:    Denoising Autoencoder Analysis
 Purpose:        Analysis of image denoising via autoencoder neural-net machine learning. Below content
                 contains autoencoder implementation, competing methods (NLM), and performance
 Python:         Version 3.9
-Authors:        Andy Dang, Ben Austin, Killian Hanson, Manish Yadav, Tayte Waterman
+Authors:        Andy Dang, Killian Hanson, Manish Yadav, Tayte Waterman
 Course:         CS541/CS441, Winter
 Assignment:     Group Project - Autoencoder Denoising
 Date:           ---
@@ -37,8 +37,6 @@ def NLM(image):
 
 #CNN Autoencoder ----------------------------------------------------------------------------------
 class Autoencoder:
-    #TODO - Model structure, hyper-parameters, and training parameters need to be reviewed/tuned
-    #       initial set-up as proof-of-concept/image testing. Has not been optimized
     def __init__(self,weights_handle='model'):
         #Constructor - Initialize NN structure and compile TensorFlow model. Attempts
         #              to reload previously trained model weights if available and
@@ -169,7 +167,6 @@ def denormalize(pixel):
     return np.uint8(pixel*255)
 v_denormalize = np.vectorize(denormalize)   #Vectorize for use over np.array
 
-
 def gen_patches(image,n=8):
     #Split input image into np.array of sub-image patches
     #Splits into n x n sub-images. Default n=8 yeilding 64 sub-images
@@ -294,7 +291,7 @@ def batch_assess(encoder,directory=TEST_ROOT,N=100,verbose=True):
     return results
 
 #Display Functions --------------------------------------------------------------------------------
-def display_metrics(ground,noise,nlm,auto,filename=None):
+def display_metrics(ground,noise,nlm,auto,filename=None,encoder_name='Autoencoder'):
     #Display metrics for input image and filtered images
     #Inputs:    ground - ground-truth, no noise image
     #           noise - noisy image provided to filters
@@ -309,7 +306,7 @@ def display_metrics(ground,noise,nlm,auto,filename=None):
     #Initialize plot
     plt.close()
     fig,ax = plt.subplots(1,4)
-    plt.suptitle('Image Denoising: NLM vs Convolutional Autoencoder', y=0.7)
+    plt.suptitle('Image Denoising: NLM vs ' + encoder_name, y=0.8)
 
     #Iterate over images
     for i in range(4):
@@ -335,7 +332,7 @@ def display_metrics(ground,noise,nlm,auto,filename=None):
         plt.show()
     return
 
-def view_samples(encoder,directory=TEST_ROOT,N=5):
+def view_samples(encoder,directory=TEST_ROOT,N=5,encoder_name='Autoencoder'):
     files = os.listdir(directory+NOISY)
     files = rd.sample(files,N)
     for file in files:
@@ -343,7 +340,7 @@ def view_samples(encoder,directory=TEST_ROOT,N=5):
         ground = get_image(directory+GROUND+file.replace('_noise.jpg','.jpg'))
         f_auto = encoder.denoise(test)
         f_nlm = NLM(test)
-        display_metrics(ground,test,f_nlm,f_auto)
+        display_metrics(ground,test,f_nlm,f_auto,encoder_name=encoder_name)
     return
 
         
@@ -353,16 +350,25 @@ def main():
     # as initial setup to invoke current content
 
     #Regenerate noisy images from original data. By default does this for all image sets
-    generate_noisy_images(var=0.01)
+    #generate_noisy_images(var=0.01)
 
-    auto = Autoencoder()
-    #auto.train()   #If commented out, Autoencoder() will pull from previously trained weights
+    auto_unsupervised = Autoencoder('unsupervised')
+    #auto_unsupervised.train(labeled=False)   #If commented out, Autoencoder() will pull from previously trained weights
 
+    auto_supervised = Autoencoder('supervised')
+    #auto_supervised.train(labeled=True)
+
+    '''
     #Assess performance
-    #batch_assess(auto,N=50)
-
+    print('Unsupervised Autoencoder:')
+    batch_assess(auto_unsupervised,N=250)
+    print('Supervised Autoencoder:')
+    batch_assess(auto_supervised,N=250)
+    '''
+    
     #Fetch random test image and display to user
-    view_samples(auto)
+    view_samples(auto_unsupervised,encoder_name='Unsupervised Autoencoder',N=3)
+    view_samples(auto_supervised,encoder_name='Supervised Autoencoder',N=3)
 
     return
 
