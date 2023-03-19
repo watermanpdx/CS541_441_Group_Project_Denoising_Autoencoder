@@ -1,5 +1,5 @@
 # CS541_Winter_Group_Project_Main
- Course/Project: 	CS541/CS441 Winter - Main Group Project Repo
+ Course/Project: 	CS541 Winter - Main Group Project Repo
  Organization:		Portland State University
  Contributors:		Andy Dang, Killian Hanson, Manish Yadav, Tayte Waterman 
  
