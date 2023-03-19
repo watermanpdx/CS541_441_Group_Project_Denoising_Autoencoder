@@ -6,7 +6,7 @@ Purpose:        Analysis of image denoising via autoencoder neural-net machine l
                 methods.
 Python:         Version 3.9
 Authors:        Andy Dang, Killian Hanson, Manish Yadav, Tayte Waterman
-Course:         CS541/CS441, Winter
+Course:         CS541 Winter
 Assignment:     Group Project - Autoencoder Denoising
 Date:           3/16/2023
 =========================================================================================================
