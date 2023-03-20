@@ -1,7 +1,7 @@
 # CS541_Winter_Group_Project_Main
  Course/Project: 	CS541 Winter - Main Group Project Repo
  Organization:		Portland State University
- Contributors:		Andy Dang, Killian Hanson, Manish Yadav, Tayte Waterman 
+ Contributors:		Andy Dang, Killian Hanson, Manisha Yadav, Tayte Waterman 
  
  Description:
  Python 3.9 implemenation of image denoising via Autoencoder. Analysis of CNN autoencoder
